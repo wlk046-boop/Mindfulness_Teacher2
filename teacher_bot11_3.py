@@ -1063,6 +1063,100 @@ async def broadcast_routine_to_students(section_name: str, header_text: str, tar
             section_name, target_batch
         )
 
+        # 🔍 Debug Print များ
+        print(f"DEBUG -> Target Batch: {target_batch}, Section: {section_name}")
+        print(f"DEBUG -> Found Students Count: {len(students)}")
+        print(f"DEBUG -> Found Tasks Count: {len(tasks)}")
+
+        if not tasks or not students:
+            print(f"⚠️ Routine ပို့ရန် မတွေ့ပါ (Tasks: {len(tasks)}, Students: {len(students)}, Batch: {target_batch})")
+            return 0
+
+        count = 0
+        async with Bot(token=STUDENT_BOT_TOKEN) as s_bot:
+            for stu in students:
+                chat_id = stu["student_id"]
+                routine_batch_id = str(uuid.uuid4())[:8]  
+                batch_message_ids = []
+
+                try:
+                    # 🗑️ Header Message & Dismiss Button
+                    header_keyboard = [
+                        [InlineKeyboardButton("🗑️ ထပ်နေပါက ဤစာရင်းကို ဖျက်မည်", callback_data=f"dismiss_batch:{routine_batch_id}")]
+                    ]
+                    
+                    h_msg = await s_bot.send_message(
+                        chat_id=chat_id,
+                        text=f"{header_text}\n\nအောက်ပါ လေ့ကျင့်မှုများကို ပြုလုပ်ပြီးပါက သက်ဆိုင်ရာခလုတ်ကို နှိပ်ပေးပါခင်ဗျာ -",
+                        reply_markup=InlineKeyboardMarkup(header_keyboard),
+                        parse_mode="Markdown"
+                    )
+                    batch_message_ids.append(h_msg.message_id)
+
+                    # 📌 Task Messages
+                    for idx, t in enumerate(tasks, start=1):
+                        t_id = t["id"]
+                        task_text = f"📌 *{idx}။ {t['title']}*"
+                        if t["description"]:
+                            task_text += f"\n_{t['description']}_"
+
+                        task_keyboard = [[InlineKeyboardButton("လုပ်ဆောင်ပြီး (Done)", callback_data=f"done:{t_id}")]
+                        ]
+                        
+                        t_msg = await s_bot.send_message(
+                            chat_id=chat_id,
+                            text=task_text,
+                            reply_markup=InlineKeyboardMarkup(task_keyboard),
+                            parse_mode="Markdown"
+                        )
+                        batch_message_ids.append(t_msg.message_id)
+
+                    # 🟢 Database Log သိမ်းဆည်းခြင်း
+                    await conn.execute(
+                        """
+                        INSERT INTO routine_batch_logs (routine_batch_id, student_id, message_ids, batch_id) 
+                        VALUES ($1, $2, $3, $4);
+                        """,
+                        routine_batch_id, chat_id, batch_message_ids, target_batch
+                    )
+                    count += 1
+
+                except Exception as e:
+                    print(f"❌ Error sending routine to {chat_id}: {e}")
+                
+                await asyncio.sleep(0.05)
+
+    return count   
+    
+
+async def broadcast_routine_to_students7(section_name: str, header_text: str, target_student_id: int = None) -> int:
+    async with db_pool.acquire() as conn:
+        target_batch = BATCH_ID
+
+        if target_student_id:
+            stu_batch = await conn.fetchval(
+                "SELECT batch_id FROM students WHERE student_id = $1;", 
+                target_student_id
+            )
+            if stu_batch:
+                target_batch = stu_batch
+            students = [{"student_id": target_student_id}]
+        else:
+            students = await conn.fetch(
+                "SELECT student_id FROM students WHERE batch_id = $1;", 
+                target_batch
+            )
+
+        tasks = await conn.fetch(
+            """
+            SELECT id, title, description 
+            FROM routine_templates 
+            WHERE section = $1 AND status = 'active' AND batch_id = $2 
+            ORDER BY task_order ASC;
+            """,
+            section_name, target_batch
+        )
+
         # 🔍 ဤနေရာတွင် ဘာတွေ ဆွဲထုတ်လာနိုင်သလဲ Terminal ၌ ကြည့်ရန် Print ထည့်ခြင်း
         print(f"DEBUG -> Target Batch: {target_batch}, Section: {section_name}")
         print(f"DEBUG -> Found Students Count: {len(students)}")
