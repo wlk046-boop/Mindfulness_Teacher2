@@ -79,7 +79,7 @@ app = FastAPI()
 @app.get("/")
 @app.head("/")
 def health_check():
-    return {"status": "active", "bot": "Teacher Bot (Batch 16) is running successfully!"}
+    return {"status": "active", "bot": "Teacher Bot (Batch  Inner Engineering) is running successfully!"}
 
 def run_fastapi():
     port = int(os.getenv("PORT", 8000))
@@ -150,7 +150,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = (
-        f"မင်္ဂလာပါ {update.effective_user.first_name} 🙏 (Admin/Teacher - Batch 16)\n\n"
+        f"မင်္ဂလာပါ {update.effective_user.first_name} 🙏 (Admin/Teacher - Batch  Inner Engineering)\n\n"
         "သင်တန်းသားများ၏ တရားလေ့ကျင့်မှု စောင့်ကြည့်စစ်ဆေးနိုင်သော Command များ:\n\n"
         "• `/today` - ယနေ့ သင်တန်းသားများ၏ Routine ပြီးစီးမှု ရာခိုင်နှုန်း စစ်ဆေးရန်\n"
         "• `/questions` - သင်တန်းသားများ မေးထားသော မေးခွန်း/အတွေ့အကြုံများ ဖတ်ရှုရန်\n"
@@ -185,7 +185,7 @@ async def today_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("ယနေ့အတွက် သင်တန်းသားများဘက်မှ မှတ်တမ်း မရှိသေးပါခင်ဗျာ။")
         return
 
-    lines = [f"📊 *ယနေ့ ({today.strftime('%d/%m/%Y')}) သင်တန်းသားများ လေ့ကျင့်မှု အခြေအနေ (Batch 16) -*\n"]
+    lines = [f"📊 *ယနေ့ ({today.strftime('%d/%m/%Y')}) သင်တန်းသားများ လေ့ကျင့်မှု အခြေအနေ (Batch  Inner Engineering) -*\n"]
     for r in rows:
         done = r["completed_tasks"]
         total = r["total_tasks"]
@@ -213,7 +213,7 @@ async def view_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("မေးခွန်းနှင့် ဆွေးနွေးချက်များ မရှိသေးပါခင်ဗျာ။")
         return
 
-    lines = ["📝 *နောက်ဆုံး လက်ခံရရှိထားသော မေးခွန်း/အတွေ့အကြုံများ (Batch 16) -*\n"]
+    lines = ["📝 *နောက်ဆုံး လက်ခံရရှိထားသော မေးခွန်း/အတွေ့အကြုံများ (Batch  Inner Engineering) -*\n"]
     for r in rows:
         created = r["created_at"].astimezone(MM_TZ).strftime("%d/%m %I:%M %p")
         status = "✅ ဖြေပြီး" if r["teacher_reply"] else "⏳ မဖြေရသေး"
@@ -542,7 +542,7 @@ def format_plain_detail_report(student_name: str, task_summary: list, start_date
 
     percent = (total_done / total_assigned * 100) if total_assigned > 0 else 0
 
-    msg = f"📊 *အပတ်စဉ် လေ့ကျင့်မှု အသေးစိတ် မှတ်တမ်း (Batch 16)*\n"
+    msg = f"📊 *အပတ်စဉ် လေ့ကျင့်မှု အသေးစိတ် မှတ်တမ်း (Batch  Inner Engineering)*\n"
     msg += f"👤 သင်တန်းသား: *{student_name}*\n"
     msg += f"📅 ကာလ: `{start_date}` မှ `{end_date}` အထိ\n"
     msg += f"📈 စုစုပေါင်း ပြီးမြောက်မှု: *{percent:.1f}%* ({total_done}/{total_assigned} ကြိမ်)\n"
@@ -731,8 +731,7 @@ async def add_task_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "⚠️ *အသုံးပြုပုံ မှားယွင်းနေပါသည်*\n\n"
             "ပုံစံ: `/add_task <အချိန်ပိုင်း> | <ခေါင်းစဉ်> | <ရှင်းလင်းချက်>`\n\n"
             "ဥပမာ:\n"
-            "`/add_task morning | မနက်ခင်း အကြောလျှော့ခြင်း | ခန္ဓာကိုယ်ကို သတိဖြင့် ဖြေလျှော့ပါ`\n\n"
-            "*(အချိန်ပိုင်း နေရာတွင် morning, afternoon သို့မဟုတ် evening ဟု ရေးပေးပါ)*",
+            "`/add_task morning | မနက်ခင်း အကြောလျှော့ခြင်း | ခန္ဓာကိုယ်ကို သတိဖြင့် ဖြေလျှော့ပါ`",
             parse_mode="Markdown"
         )
         return
@@ -747,21 +746,24 @@ async def add_task_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     async with db_pool.acquire() as conn:
+        # 🟢 ၁။ ဤ Batch အတွက်သာ လက်ရှိ max order ကို ရှာခြင်း
         last_order = await conn.fetchval(
-            "SELECT COALESCE(MAX(task_order), 0) FROM routine_templates WHERE section = $1;",
-            section
+            "SELECT COALESCE(MAX(task_order), 0) FROM routine_templates WHERE section = $1 AND batch_id = $2;",
+            section, BATCH_ID
         )
         new_order = last_order + 1
+        
+        # 🟢 ၂။ SQL တွင် batch_id ကော်လံနှင့် $5 parameter ထည့်သွင်းခြင်း
         await conn.execute(
             """
-            INSERT INTO routine_templates (section, task_order, title, description, status, is_active)
-            VALUES ($1, $2, $3, $4, 'active', TRUE);
+            INSERT INTO routine_templates (section, task_order, title, description, status, is_active, batch_id)
+            VALUES ($1, $2, $3, $4, 'active', TRUE, $5);
             """,
             section, new_order, title, description, BATCH_ID
         )
 
     await update.message.reply_text(
-        f"✅ *Task အသစ် အောင်မြင်စွာ ထည့်သွင်းပြီးပါပြီ!*\n\n"
+        f"✅ *({BATCH_ID}) အတွက် Task အသစ် အောင်မြင်စွာ ထည့်သွင်းပြီးပါပြီ!*\n\n"
         f"⏰ အချိန်ပိုင်း: *{section.capitalize()}* (အမှတ်စဉ်: {new_order})\n"
         f"📌 ခေါင်းစဉ်: *{title}*\n"
         f"📝 ရှင်းလင်းချက်: _{description}_",
@@ -834,8 +836,54 @@ async def toggle_task_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         parse_mode="Markdown"
     )
 
-
 async def list_tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        return
+
+    # Command ထဲတွင် batch နာမည် ပါမပါ စစ်ဆေးခြင်း (ဥပမာ: /list_tasks batch_Youth)
+    args = context.args
+    target_batch = args[0] if args else BATCH_ID
+
+    async with db_pool.acquire() as conn:
+        # 🟢 active_tasks တွင် batch_id ဖြင့် စစ်ထုတ်ခြင်း
+        active_tasks = await conn.fetch(
+            "SELECT id, section, task_order, title FROM routine_templates WHERE status = 'active' AND batch_id = $1 ORDER BY section, task_order ASC;",
+            target_batch
+        )
+        # 🟢 next_tasks တွင် batch_id ဖြင့် စစ်ထုတ်ခြင်း
+        next_tasks = await conn.fetch(
+            "SELECT id, section, task_order, title FROM routine_templates WHERE status = 'next' AND batch_id = $1 ORDER BY section, task_order ASC;",
+            target_batch
+        )
+
+    msg = [f"📋 *Routine စီမံခန့်ခွဲမှု အခြေအနေ ({target_batch})*\n"]
+    
+    msg.append("🟢 *လက်ရှိ သုံးနေသော Tasks (Active):*")
+    if active_tasks:
+        for t in active_tasks:
+            clean_title = t['title'].replace("*", "").replace("_", " ")
+            sec_code = t['section'][:1].upper()
+            msg.append(f"  • [{sec_code}] {clean_title} (ID: `{t['id']}`)")
+    else:
+        msg.append("  _(မရှိသေးပါ)_")
+
+    msg.append("\n🟡 *နောက်အပတ်အတွက် ကြိုထည့်ထားသော Tasks (Next):*")
+    if next_tasks:
+        for t in next_tasks:
+            clean_title = t['title'].replace("*", "").replace("_", " ")
+            sec_code = t['section'][:1].upper()
+            msg.append(f"  • [{sec_code}] {clean_title} (ID: `{t['id']}`)")
+        msg.append("\n👉 အပတ်သစ်သို့ ပြောင်းလဲအသုံးပြုရန်: `/switch_week`")
+    else:
+        msg.append("  _(ကြိုတင်ထည့်ထားသော Task မရှိပါ)_")
+
+    final_text = "\n".join(msg)
+    try:
+        await update.message.reply_text(final_text, parse_mode="Markdown")
+    except Exception:
+        await update.message.reply_text(final_text)
+        
+async def list_tasks_command2(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
 
@@ -1001,9 +1049,9 @@ async def broadcast_routine_to_students2(section_name: str, header_text: str, ta
     return count
 
 SECTION_HEADERS = {
-    "morning": "🌅 *မင်္ဂလာနံနက်ခင်းပါ သင်တန်းသား/သူတို့ရေ (Batch 16)*",
-    "afternoon": "☀️ *မင်္ဂလာနေ့လယ်ခင်းပါ သင်တန်းသား/သူတို့ရေ (Batch 16)*",
-    "evening": "🌙 *မင်္ဂလာညနေခင်းပါ သင်တန်းသား/သူတို့ရေ (Batch 16)*"
+    "morning": "🌅 *မင်္ဂလာနံနက်ခင်းပါ သင်တန်းသား/သူတို့ရေ (Batch  Inner Engineering)*",
+    "afternoon": "☀️ *မင်္ဂလာနေ့လယ်ခင်းပါ သင်တန်းသား/သူတို့ရေ (Batch  Inner Engineering)*",
+    "evening": "🌙 *မင်္ဂလာညနေခင်းပါ သင်တန်းသား/သူတို့ရေ (Batch  Inner Engineering)*"
 }
 
 async def cmd_send_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1018,7 +1066,7 @@ async def cmd_send_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Section အမည် မှားယွင်းနေပါသည်။")
         return
 
-    status_msg = await update.message.reply_text(f"⏳ Batch 16 အတွက် *{section}* routine ပို့ဆောင်နေပါသည်...", parse_mode="Markdown")
+    status_msg = await update.message.reply_text(f"⏳ Batch  Inner Engineering အတွက် *{section}* routine ပို့ဆောင်နေပါသည်...", parse_mode="Markdown")
     sent_count = await broadcast_routine_to_students(section_name=section, header_text=SECTION_HEADERS[section])
     await status_msg.edit_text(f"✅ *{section.capitalize()} Routine ပို့ဆောင်ပြီးပါပြီ!*\n👥 လက်ခံရရှိသူ: *{sent_count}* ဦး", parse_mode="Markdown")
 
@@ -1042,7 +1090,7 @@ async def send_weekly_report(app, manual_chat_id=None):
 
     if not perf_rows:
         for admin_id in target_recipients:
-            await app.bot.send_message(chat_id=admin_id, text="Batch 16 အတွက် ပြီးခဲ့သည့် ၇ ရက်အတွင်း ဒေတာ မရှိသေးပါ။")
+            await app.bot.send_message(chat_id=admin_id, text="Batch  Inner Engineering အတွက် ပြီးခဲ့သည့် ၇ ရက်အတွင်း ဒေတာ မရှိသေးပါ။")
         return
 
     df_perf = pd.DataFrame([dict(r) for r in perf_rows])
@@ -1050,17 +1098,17 @@ async def send_weekly_report(app, manual_chat_id=None):
 
     excel_buffer = io.BytesIO()
     with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-        df_perf.to_excel(writer, sheet_name='Batch 16 Performance', index=False)
+        df_perf.to_excel(writer, sheet_name='Batch  Inner Engineering Performance', index=False)
     excel_buffer.seek(0)
 
     for admin_id in target_recipients:
         try:
-            filename = f"Batch16_Weekly_Report_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
+            filename = f"Batch Inner Engineering_Weekly_Report_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
             await app.bot.send_document(
                 chat_id=admin_id,
                 document=excel_buffer,
                 filename=filename,
-                caption="📁 *Batch 16 သင်တန်းသားများ၏ တစ်ပတ်တာ အသေးစိတ်စာရင်း Excel ဖိုင်*"
+                caption="📁 *Batch  Inner Engineering သင်တန်းသားများ၏ တစ်ပတ်တာ အသေးစိတ်စာရင်း Excel ဖိုင်*"
             )
         except Exception as e:
             print(f"Failed to send weekly report: {e}")
@@ -1384,7 +1432,7 @@ async def post_init(application):
         name="Weekly Report"
     )
     scheduler.start()
-    print("⏰ Routine & Report Schedulers started successfully (Batch Youth)...")
+    print("⏰ Routine & Report Schedulers started successfully (Batch  Inner Engineering)...")
 
 
 async def manual_weekly_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1649,7 +1697,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(handle_send_routine_callback, pattern=r"^send_routine:"))
     app.add_error_handler(error_handler)
 
-    print("🤖 Teacher Bot (Batch Youth) is up and running...")
+    print("🤖 Teacher Bot (Batch  Inner Engineering) is up and running...")
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
