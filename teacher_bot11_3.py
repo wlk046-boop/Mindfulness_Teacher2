@@ -733,25 +733,6 @@ async def process_and_send_ai_report(message_obj, student_id: int):
         await status.edit_text(f"❌ Error ဖြစ်ပေါ်နေပါသည်: {e}")
         
         
-async def process_and_send_ai_report2(message_obj, student_id: int):
-    status = await message_obj.reply_text("⏳ Gemini AI ဖြင့် သုံးသပ်ချက် ထုတ်ယူနေပါသည်...")
-    try:
-        today = datetime.now(MM_TZ).date()
-        start_date = today - timedelta(days=7)
-        
-        async with db_pool.acquire() as conn:
-            student = await conn.fetchrow("SELECT student_name FROM students WHERE student_id = $1;", student_id)
-            student_name = student["student_name"] if (student and student["student_name"]) else "သင်တန်းသား"
-            task_summary = await get_student_task_breakdown(conn, student_id, start_date, today)
-            
-        plain_stats = format_plain_detail_report(student_name, task_summary, start_date, today)
-        ai_feedback = await generate_personalized_ai_report(student_name, task_summary)
-        
-        full_message = f"{plain_stats}\n\n🤖 *ဆရာ့ထံမှ အကြံပြု သုံးသပ်ချက်*\n━━━━━━━━━━━━━━━━━━━━\n{ai_feedback}"
-        await message_obj.reply_text(full_message)
-        await status.delete()
-    except Exception as e:
-        await status.edit_text(f"❌ Error ဖြစ်ပေါ်နေပါသည်: {e}")
 
 async def add_task_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
@@ -916,112 +897,8 @@ async def list_tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except Exception:
         await update.message.reply_text(final_text)
         
-async def list_tasks_command2(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
-        return
+      
 
-    async with db_pool.acquire() as conn:
-        active_tasks = await conn.fetch(
-            "SELECT id, section, task_order, title FROM routine_templates WHERE status = 'active' ORDER BY section, task_order ASC;"
-        )
-        next_tasks = await conn.fetch(
-            "SELECT id, section, task_order, title FROM routine_templates WHERE status = 'next' ORDER BY section, task_order ASC;"
-        )
-
-    msg = ["📋 *Routine စီမံခန့်ခွဲမှု အခြေအနေ*\n"]
-    msg.append("🟢 *လက်ရှိ သုံးနေသော Tasks (Active):*")
-    if active_tasks:
-        for t in active_tasks:
-            clean_title = t['title'].replace("*", "").replace("_", " ")
-            sec_code = t['section'][:1].upper()
-            msg.append(f"  • [{sec_code}] {clean_title} (ID: `{t['id']}`)")
-    else:
-        msg.append("  _(မရှိသေးပါ)_")
-
-    msg.append("\n🟡 *နောက်အပတ်အတွက် ကြိုထည့်ထားသော Tasks (Next):*")
-    if next_tasks:
-        for t in next_tasks:
-            clean_title = t['title'].replace("*", "").replace("_", " ")
-            sec_code = t['section'][:1].upper()
-            msg.append(f"  • [{sec_code}] {clean_title} (ID: `{t['id']}`)")
-        msg.append("\n👉 အပတ်သစ်သို့ ပြောင်းလဲအသုံးပြုရန်: `/switch_week`")
-    else:
-        msg.append("  _(ကြိုတင်ထည့်ထားသော Task မရှိပါ - ထည့်ရန်: `/add_next`)_")
-
-    final_text = "\n".join(msg)
-    try:
-        await update.message.reply_text(final_text, parse_mode="Markdown")
-    except Exception:
-        await update.message.reply_text(final_text)
-        
-
-
-async def broadcast_routine_to_students2(section_name: str, header_text: str, target_student_id: int = None) -> int:
-    async with db_pool.acquire() as conn:
-        if target_student_id:
-            students = [{"student_id": target_student_id}]
-        else:
-            # 🟢 batch_Youth များကိုသာ တိုက်ရိုက် ပို့မည်
-            students = await conn.fetch("SELECT student_id FROM students WHERE batch_id = $1;", BATCH_ID)
-
-        tasks = await conn.fetch(
-            "SELECT id, title, description FROM routine_templates WHERE section = $1 AND status = 'active' ORDER BY task_order ASC;",
-            section_name
-        )
-
-    if not tasks or not students:
-        return 0
-
-    count = 0
-    async with Bot(token=STUDENT_BOT_TOKEN) as s_bot:
-        for stu in students:
-            chat_id = stu["student_id"]
-            batch_id = str(uuid.uuid4())[:8]
-            batch_message_ids = []
-
-            try:
-                # 🟢 ဤနေရာတွင် dismiss_batch ခလုတ်ကို Header နှင့်အတူ ပူးတွဲထည့်ပေးရပါမည်
-                header_keyboard = [
-                    [InlineKeyboardButton("🗑️ ထပ်နေပါက ဤစာရင်းကို ဖျက်မည်", callback_data=f"dismiss_batch:{batch_id}")]
-                ]
-                h_msg = await s_bot.send_message(
-                    chat_id=chat_id,
-                    text=f"{header_text}\n\nအောက်ပါ လေ့ကျင့်မှုများကို ပြုလုပ်ပြီးပါက သက်ဆိုင်ရာခလုတ်ကို နှိပ်ပေးပါခင်ဗျာ -",
-                    parse_mode="Markdown"
-                )
-                batch_message_ids.append(h_msg.message_id)
-
-                for idx, t in enumerate(tasks, start=1):
-                    t_id = t["id"]
-                    task_text = f"📌 *{idx}။ {t['title']}*"
-                    if t["description"]:
-                        task_text += f"\n_{t['description']}_"
-
-                    task_keyboard = [[InlineKeyboardButton("လုပ်ဆောင်ပြီး (Done)", callback_data=f"done:{t_id}")]]
-                    t_msg = await s_bot.send_message(
-                        chat_id=chat_id,
-                        text=task_text,
-                        reply_markup=InlineKeyboardMarkup(task_keyboard),
-                        parse_mode="Markdown"
-                    )
-                    batch_message_ids.append(t_msg.message_id)
-
-                async with db_pool.acquire() as conn:
-                    await conn.execute(
-                        "INSERT INTO routine_batch_logs (batch_id, student_id, message_ids) VALUES ($1, $2, $3);",
-                        batch_id, chat_id, batch_message_ids
-                    )
-                count += 1
-            except Exception as e:
-                print(f"Error sending to {chat_id}: {e}")
-            await asyncio.sleep(0.05)
-    return count
-
-SECTION_HEADERS = {
-    "morning": "🌅 *မင်္ဂလာနံနက်ခင်းပါ သင်တန်းသား/သူတို့ရေ (Batch Inner Engineering)*",
-    "afternoon": "☀️ *မင်္ဂလာနေ့လယ်ခင်းပါ သင်တန်းသား/သူတို့ရေ (Batch Inner Engineering)*",
-    "evening": "🌙 *မင်္ဂလာညနေခင်းပါ သင်တန်းသား/သူတို့ရေ (Batch Inner Engineering)*"
-}
 
 
 async def cmd_send_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1052,21 +929,7 @@ async def cmd_send_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await status_msg.edit_text(f"✅ *{section.capitalize()} Routine ပို့ဆောင်ပြီးပါပြီ!*\n👥 လက်ခံရရှိသူ: *{sent_count}* ဦး", parse_mode="Markdown")
     
-async def cmd_send_routine7(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
-        return
-    if not context.args:
-        await update.message.reply_text("အသုံးပြုပုံ: `/send_routine <morning|afternoon|evening>`", parse_mode="Markdown")
-        return
 
-    section = context.args[0].lower().strip()
-    if section not in SECTION_HEADERS:
-        await update.message.reply_text("⚠️ Section အမည် မှားယွင်းနေပါသည်။")
-        return
-
-    status_msg = await update.message.reply_text(f"⏳ Batch Inner Engineering အတွက် *{section}* routineeeeeeee ပို့ဆောင်နေပါသည်...", parse_mode="Markdown")
-    sent_count = await broadcast_routine_to_students(section_name=section, header_text=SECTION_HEADERS[section])
-    await status_msg.edit_text(f"✅ *{section.capitalize()} Routine ပို့ဆောင်ပြီးပါပြီ!*\n👥 လက်ခံရရှိသူ: *{sent_count}* ဦး", parse_mode="Markdown")
     
 async def broadcast_routine_to_students(section_name: str, header_text: str, target_student_id: int = None) -> int:
     async with db_pool.acquire() as conn:
@@ -1162,44 +1025,6 @@ async def broadcast_routine_to_students(section_name: str, header_text: str, tar
     return count   
     
 
-async def broadcast_routine_to_students7(section_name: str, header_text: str, target_student_id: int = None) -> int:
-    async with db_pool.acquire() as conn:
-        target_batch = BATCH_ID
-
-        if target_student_id:
-            stu_batch = await conn.fetchval(
-                "SELECT batch_id FROM students WHERE student_id = $1;", 
-                target_student_id
-            )
-            if stu_batch:
-                target_batch = stu_batch
-            students = [{"student_id": target_student_id}]
-        else:
-            students = await conn.fetch(
-                "SELECT student_id FROM students WHERE batch_id = $1;", 
-                target_batch
-            )
-
-        tasks = await conn.fetch(
-            """
-            SELECT id, title, description 
-            FROM routine_templates 
-            WHERE section = $1 AND status = 'active' AND batch_id = $2 
-            ORDER BY task_order ASC;
-            """,
-            section_name, target_batch
-        )
-
-        # 🔍 ဤနေရာတွင် ဘာတွေ ဆွဲထုတ်လာနိုင်သလဲ Terminal ၌ ကြည့်ရန် Print ထည့်ခြင်း
-        print(f"DEBUG -> Target Batch: {target_batch}, Section: {section_name}")
-        print(f"DEBUG -> Found Students Count: {len(students)}")
-        print(f"DEBUG -> Found Tasks Count: {len(tasks)}")
-
-        if not tasks or not students:
-            print(f"⚠️ Routine ပို့ရန် မတွေ့ပါ (Tasks: {len(tasks)}, Students: {len(students)}, Batch: {target_batch})")
-            return 0
-            
-        # (ကျန်သည့် ပို့ဆောင်သည့် ကုဒ်များ ဆက်လက်တည်ရှိမည်...)
 
 
 async def send_weekly_report(app, manual_chat_id=None):
@@ -1289,6 +1114,7 @@ async def cmd_check_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += f"🔹 *ID:* `{job.id}`\n   *အမည်:* {job.name}\n   *နောက်တစ်ကြိမ် ပို့မည့်အချိန်:* `{job.next_run_time}`\n\n"
 
     await update.message.reply_text(text, parse_mode="Markdown")
+    
 async def notify_with_three_beeps(chat_id: int, reminder_text: str):
     for _ in range(2):
         try:
@@ -1314,64 +1140,7 @@ async def notify_with_three_beeps(chat_id: int, reminder_text: str):
         await asyncio.sleep(e.retry_after)
         await student_bot.send_message(chat_id=chat_id, text=reminder_text, parse_mode="Markdown", disable_notification=False)
 
-async def send_section_pending_reminder2(application, section_name: str, reminder_title: str):
-    today = datetime.now(MM_TZ).date()
 
-    async with db_pool.acquire() as conn:
-        active_tasks = await conn.fetch(
-            "SELECT id FROM routine_templates WHERE section = $1 AND status = 'active';",
-            section_name
-        )
-        if not active_tasks:
-            return
-
-        total_active_count = len(active_tasks)
-
-        query = """
-        SELECT 
-            s.student_id, 
-            s.student_name,
-            ARRAY_AGG(rt.title) FILTER (WHERE sdl.id IS NULL) AS pending_tasks
-        FROM students s
-        CROSS JOIN routine_templates rt
-        LEFT JOIN student_daily_logs sdl 
-            ON sdl.student_id = s.student_id 
-            AND sdl.template_id = rt.id 
-            AND sdl.log_date = $1
-        WHERE rt.section = $2 AND rt.status = 'active'
-        GROUP BY s.student_id, s.student_name
-        HAVING COUNT(sdl.id) < $3;
-        """
-        pending_students = await conn.fetch(query, today, section_name, total_active_count)
-
-    if not pending_students:
-        return
-
-    for idx, stu in enumerate(pending_students):
-        s_id = stu["student_id"]
-        s_name = stu["student_name"] or "သင်တန်းသား"
-        tasks = stu["pending_tasks"] or []
-        task_list_str = "\n".join([f"  ▫️ {t}" for t in tasks])
-
-        msg = (
-            f"🔔 *{reminder_title}*\n\n"
-            f"မင်္ဂလာပါ *{s_name}* ခင်ဗျာ၊\n"
-            f"ယနေ့ {section_name} အတွက် အောက်ပါ လေ့ကျင့်ခန်းများ လုပ်ဆောင်ရန် ကျန်ရှိနေပါသေးသည် -\n\n"
-            f"{task_list_str}\n\n"
-            f"အဆင်ပြေသည့်အခါ အထက်ရှိ စာရင်းမှတစ်ဆင့် ပြီးစီးကြောင်း မှတ်သားပေးပါခင်ဗျာ။ 🙏"
-        )
-
-        try:
-            await notify_with_three_beeps(s_id, msg)
-        except Forbidden:
-            print(f"⚠️ Student {s_id} blocked the bot.")
-        except Exception as e:
-            print(f"❌ Failed to remind {s_id}: {e}")
-
-        if (idx + 1) % 20 == 0:
-            await asyncio.sleep(2.0)
-        else:
-            await asyncio.sleep(0.1)
             
 async def send_section_pending_reminder(application, section_name: str, reminder_title: str):
     today = datetime.now(MM_TZ).date()
@@ -1436,17 +1205,22 @@ async def send_section_pending_reminder(application, section_name: str, reminder
             await asyncio.sleep(2.0)
         else:
             await asyncio.sleep(0.1)
-
+            
 async def send_evening_all_pending_summary(application):
     today = datetime.now(MM_TZ).date()
 
     async with db_pool.acquire() as conn:
-        active_tasks = await conn.fetch("SELECT id FROM routine_templates WHERE status = 'active';")
+        # 🟢 1. သက်ဆိုင်ရာ batch_id အတွက် active tasks များကိုသာ ယူခြင်း
+        active_tasks = await conn.fetch(
+            "SELECT id FROM routine_templates WHERE status = 'active' AND batch_id = $1;",
+            BATCH_ID
+        )
         if not active_tasks:
             return
 
         total_active_count = len(active_tasks)
 
+        # 🟢 2. SQL Query တွင် batch_id ကို တိကျစွာ ကန့်သတ်ပေးခြင်း
         query = """
         SELECT 
             s.student_id, 
@@ -1461,11 +1235,11 @@ async def send_evening_all_pending_summary(application):
             ON sdl.student_id = s.student_id 
             AND sdl.template_id = rt.id 
             AND sdl.log_date = $1
-        WHERE rt.status = 'active'
+        WHERE rt.status = 'active' AND rt.batch_id = $2 AND s.batch_id = $2
         GROUP BY s.student_id, s.student_name
-        HAVING COUNT(sdl.id) < $2;
+        HAVING COUNT(sdl.id) < $3;
         """
-        pending_students = await conn.fetch(query, today, total_active_count)
+        pending_students = await conn.fetch(query, today, BATCH_ID, total_active_count)
 
     if not pending_students:
         return
@@ -1499,6 +1273,7 @@ async def send_evening_all_pending_summary(application):
             await asyncio.sleep(2.0)
         else:
             await asyncio.sleep(0.1)
+
 
 async def cmd_remind_pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
