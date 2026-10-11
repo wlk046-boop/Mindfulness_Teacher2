@@ -79,7 +79,7 @@ app = FastAPI()
 @app.get("/")
 @app.head("/")
 def health_check():
-    return {"status": "active", "bot": "Teacher Bot (Batch Youth) is running successfully!"}
+    return {"status": "active", "bot": "Teacher Bot (Batch Inner Engineering) is running successfully!"}
 
 def run_fastapi():
     port = int(os.getenv("PORT", 8000))
@@ -150,7 +150,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = (
-        f"မင်္ဂလာပါ {update.effective_user.first_name} 🙏 (Admin/Teacher - Batch Youth)\n\n"
+        f"မင်္ဂလာပါ {update.effective_user.first_name} 🙏 (Admin/Teacher - Batch Inner Engineering)\n\n"
         "သင်တန်းသားများ၏ တရားလေ့ကျင့်မှု စောင့်ကြည့်စစ်ဆေးနိုင်သော Command များ:\n\n"
         "• `/today` - ယနေ့ သင်တန်းသားများ၏ Routine ပြီးစီးမှု ရာခိုင်နှုန်း စစ်ဆေးရန်\n"
         "• `/questions` - သင်တန်းသားများ မေးထားသော မေးခွန်း/အတွေ့အကြုံများ ဖတ်ရှုရန်\n"
@@ -185,7 +185,7 @@ async def today_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("ယနေ့အတွက် သင်တန်းသားများဘက်မှ မှတ်တမ်း မရှိသေးပါခင်ဗျာ။")
         return
 
-    lines = [f"📊 *ယနေ့ ({today.strftime('%d/%m/%Y')}) သင်တန်းသားများ လေ့ကျင့်မှု အခြေအနေ (Batch Youth) -*\n"]
+    lines = [f"📊 *ယနေ့ ({today.strftime('%d/%m/%Y')}) သင်တန်းသားများ လေ့ကျင့်မှု အခြေအနေ (Batch Inner Engineering) -*\n"]
     for r in rows:
         done = r["completed_tasks"]
         total = r["total_tasks"]
@@ -213,7 +213,7 @@ async def view_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("မေးခွန်းနှင့် ဆွေးနွေးချက်များ မရှိသေးပါခင်ဗျာ။")
         return
 
-    lines = ["📝 *နောက်ဆုံး လက်ခံရရှိထားသော မေးခွန်း/အတွေ့အကြုံများ (Batch Youth) -*\n"]
+    lines = ["📝 *နောက်ဆုံး လက်ခံရရှိထားသော မေးခွန်း/အတွေ့အကြုံများ (Batch Inner Engineering) -*\n"]
     for r in rows:
         created = r["created_at"].astimezone(MM_TZ).strftime("%d/%m %I:%M %p")
         status = "✅ ဖြေပြီး" if r["teacher_reply"] else "⏳ မဖြေရသေး"
@@ -542,7 +542,7 @@ def format_plain_detail_report(student_name: str, task_summary: list, start_date
 
     percent = (total_done / total_assigned * 100) if total_assigned > 0 else 0
 
-    msg = f"📊 *အပတ်စဉ် လေ့ကျင့်မှု အသေးစိတ် မှတ်တမ်း (Batch Youth)*\n"
+    msg = f"📊 *အပတ်စဉ် လေ့ကျင့်မှု အသေးစိတ် မှတ်တမ်း (Batch Inner Engineering)*\n"
     msg += f"👤 သင်တန်းသား: *{student_name}*\n"
     msg += f"📅 ကာလ: `{start_date}` မှ `{end_date}` အထိ\n"
     msg += f"📈 စုစုပေါင်း ပြီးမြောက်မှု: *{percent:.1f}%* ({total_done}/{total_assigned} ကြိမ်)\n"
@@ -699,8 +699,41 @@ async def cmd_ai_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg_lines.append(f"• `{cmd_text}`")
         
         await update.message.reply_text("\n".join(msg_lines), parse_mode="Markdown")
-
+        
+        
 async def process_and_send_ai_report(message_obj, student_id: int):
+    status = await message_obj.reply_text("⏳ Gemini AI ဖြင့် သုံးသပ်ချက် ထုတ်ယူနေပါသည်...")
+    try:
+        today = datetime.now(MM_TZ).date()
+        start_date = today - timedelta(days=7)
+        
+        async with db_pool.acquire() as conn:
+            student = await conn.fetchrow("SELECT student_name FROM students WHERE student_id = $1;", student_id)
+            student_name = student["student_name"] if (student and student["student_name"]) else "သင်တန်းသား"
+            task_summary = await get_student_task_breakdown(conn, student_id, start_date, today)
+            
+        plain_stats = format_plain_detail_report(student_name, task_summary, start_date, today)
+        ai_feedback = await generate_personalized_ai_report(student_name, task_summary)
+        
+        full_message = f"{plain_stats}\n\n🤖 *ဆရာ့ထံမှ အကြံပြု သုံးသပ်ချက်*\n━━━━━━━━━━━━━━━━━━━━\n{ai_feedback}"
+        
+        # 🟢 Telegram ၏ 4096 character ကန့်သတ်ချက်ကို ကျော်လွန်ပါက အပိုင်းခွဲပို့ရန်
+        MAX_LENGTH = 4000
+        if len(full_message) <= MAX_LENGTH:
+            await message_obj.reply_text(full_message)
+        else:
+            # စာသားရှည်လျှင် အပိုင်းလိုက် ခွဲထုတ်၍ ပို့ခြင်း
+            chunks = [full_message[i:i + MAX_LENGTH] for i in range(0, len(full_message), MAX_LENGTH)]
+            for chunk in chunks:
+                await message_obj.reply_text(chunk)
+                await asyncio.sleep(0.3) # ပို့ဆောင်မှု တိုက်မိခြင်းမှ ကာကွယ်ရန် ခဏစောင့်ခြင်း
+
+        await status.delete()
+    except Exception as e:
+        await status.edit_text(f"❌ Error ဖြစ်ပေါ်နေပါသည်: {e}")
+        
+        
+async def process_and_send_ai_report2(message_obj, student_id: int):
     status = await message_obj.reply_text("⏳ Gemini AI ဖြင့် သုံးသပ်ချက် ထုတ်ယူနေပါသည်...")
     try:
         today = datetime.now(MM_TZ).date()
@@ -985,9 +1018,9 @@ async def broadcast_routine_to_students2(section_name: str, header_text: str, ta
     return count
 
 SECTION_HEADERS = {
-    "morning": "🌅 *မင်္ဂလာနံနက်ခင်းပါ သင်တန်းသား/သူတို့ရေ (Batch Youth)*",
-    "afternoon": "☀️ *မင်္ဂလာနေ့လယ်ခင်းပါ သင်တန်းသား/သူတို့ရေ (Batch Youth)*",
-    "evening": "🌙 *မင်္ဂလာညနေခင်းပါ သင်တန်းသား/သူတို့ရေ (Batch Youth)*"
+    "morning": "🌅 *မင်္ဂလာနံနက်ခင်းပါ သင်တန်းသား/သူတို့ရေ (Batch Inner Engineering)*",
+    "afternoon": "☀️ *မင်္ဂလာနေ့လယ်ခင်းပါ သင်တန်းသား/သူတို့ရေ (Batch Inner Engineering)*",
+    "evening": "🌙 *မင်္ဂလာညနေခင်းပါ သင်တန်းသား/သူတို့ရေ (Batch Inner Engineering)*"
 }
 
 
@@ -1011,7 +1044,7 @@ async def cmd_send_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Section အမည် မှားယွင်းနေပါသည်။")
         return
 
-    status_msg = await update.message.reply_text(f"⏳ Batch အတွက် *{section}* routine ပို့ဆောင်နေပါသည်...", parse_mode="Markdown")
+    status_msg = await update.message.reply_text(f"⏳ Batch Inner Engineering အတွက် *{section}* routine ပို့ဆောင်နေပါသည်...", parse_mode="Markdown")
     
     # broadcast ဖန်ရှင်ကို ခေါ်ခြင်း
     sent_count = await broadcast_routine_to_students(section_name=section, header_text=SECTION_HEADERS[section])
@@ -1031,7 +1064,7 @@ async def cmd_send_routine7(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Section အမည် မှားယွင်းနေပါသည်။")
         return
 
-    status_msg = await update.message.reply_text(f"⏳ Batch Youth အတွက် *{section}* routineeeeeeee ပို့ဆောင်နေပါသည်...", parse_mode="Markdown")
+    status_msg = await update.message.reply_text(f"⏳ Batch Inner Engineering အတွက် *{section}* routineeeeeeee ပို့ဆောင်နေပါသည်...", parse_mode="Markdown")
     sent_count = await broadcast_routine_to_students(section_name=section, header_text=SECTION_HEADERS[section])
     await status_msg.edit_text(f"✅ *{section.capitalize()} Routine ပို့ဆောင်ပြီးပါပြီ!*\n👥 လက်ခံရရှိသူ: *{sent_count}* ဦး", parse_mode="Markdown")
     
@@ -1189,7 +1222,7 @@ async def send_weekly_report(app, manual_chat_id=None):
 
     if not perf_rows:
         for admin_id in target_recipients:
-            await app.bot.send_message(chat_id=admin_id, text="Batch Youth အတွက် ပြီးခဲ့သည့် ၇ ရက်အတွင်း ဒေတာ မရှိသေးပါ။")
+            await app.bot.send_message(chat_id=admin_id, text="Batch Inner Engineering အတွက် ပြီးခဲ့သည့် ၇ ရက်အတွင်း ဒေတာ မရှိသေးပါ။")
         return
 
     df_perf = pd.DataFrame([dict(r) for r in perf_rows])
@@ -1197,17 +1230,17 @@ async def send_weekly_report(app, manual_chat_id=None):
 
     excel_buffer = io.BytesIO()
     with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-        df_perf.to_excel(writer, sheet_name='Batch Youth Performance', index=False)
+        df_perf.to_excel(writer, sheet_name='Batch Inner Engineering Performance', index=False)
     excel_buffer.seek(0)
 
     for admin_id in target_recipients:
         try:
-            filename = f"Batch Youth_Weekly_Report_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
+            filename = f"Batch Inner Engineering_Weekly_Report_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
             await app.bot.send_document(
                 chat_id=admin_id,
                 document=excel_buffer,
                 filename=filename,
-                caption="📁 *Batch Youth သင်တန်းသားများ၏ တစ်ပတ်တာ အသေးစိတ်စာရင်း Excel ဖိုင်*"
+                caption="📁 *Batch Inner Engineering သင်တန်းသားများ၏ တစ်ပတ်တာ အသေးစိတ်စာရင်း Excel ဖိုင်*"
             )
         except Exception as e:
             print(f"Failed to send weekly report: {e}")
@@ -1531,7 +1564,7 @@ async def post_init(application):
         name="Weekly Report"
     )
     scheduler.start()
-    print("⏰ Routine & Report Schedulers started successfully (Batch Youth)...")
+    print("⏰ Routine & Report Schedulers started successfully (Batch Inner Engineering)...")
 
 
 async def manual_weekly_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1796,7 +1829,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(handle_send_routine_callback, pattern=r"^send_routine:"))
     app.add_error_handler(error_handler)
 
-    print("🤖 Teacher Bot (Batch Youth) is up and running...")
+    print("🤖 Teacher Bot (Batch Inner Engineering) is up and running...")
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
