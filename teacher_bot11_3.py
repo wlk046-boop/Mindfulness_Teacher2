@@ -1314,7 +1314,7 @@ async def notify_with_three_beeps(chat_id: int, reminder_text: str):
         await asyncio.sleep(e.retry_after)
         await student_bot.send_message(chat_id=chat_id, text=reminder_text, parse_mode="Markdown", disable_notification=False)
 
-async def send_section_pending_reminder(application, section_name: str, reminder_title: str):
+async def send_section_pending_reminder2(application, section_name: str, reminder_title: str):
     today = datetime.now(MM_TZ).date()
 
     async with db_pool.acquire() as conn:
@@ -1352,6 +1352,70 @@ async def send_section_pending_reminder(application, section_name: str, reminder
         s_name = stu["student_name"] or "သင်တန်းသား"
         tasks = stu["pending_tasks"] or []
         task_list_str = "\n".join([f"  ▫️ {t}" for t in tasks])
+
+        msg = (
+            f"🔔 *{reminder_title}*\n\n"
+            f"မင်္ဂလာပါ *{s_name}* ခင်ဗျာ၊\n"
+            f"ယနေ့ {section_name} အတွက် အောက်ပါ လေ့ကျင့်ခန်းများ လုပ်ဆောင်ရန် ကျန်ရှိနေပါသေးသည် -\n\n"
+            f"{task_list_str}\n\n"
+            f"အဆင်ပြေသည့်အခါ အထက်ရှိ စာရင်းမှတစ်ဆင့် ပြီးစီးကြောင်း မှတ်သားပေးပါခင်ဗျာ။ 🙏"
+        )
+
+        try:
+            await notify_with_three_beeps(s_id, msg)
+        except Forbidden:
+            print(f"⚠️ Student {s_id} blocked the bot.")
+        except Exception as e:
+            print(f"❌ Failed to remind {s_id}: {e}")
+
+        if (idx + 1) % 20 == 0:
+            await asyncio.sleep(2.0)
+        else:
+            await asyncio.sleep(0.1)
+            
+async def send_section_pending_reminder(application, section_name: str, reminder_title: str):
+    today = datetime.now(MM_TZ).date()
+
+    async with db_pool.acquire() as conn:
+        # 🟢 1. သက်ဆိုင်ရာ batch_id ၏ active tasks များကိုသာ အရင်ယူခြင်း
+        active_tasks = await conn.fetch(
+            "SELECT id FROM routine_templates WHERE section = $1 AND status = 'active' AND batch_id = $2;",
+            section_name, BATCH_ID
+        )
+        if not active_tasks:
+            return
+
+        total_active_count = len(active_tasks)
+
+        # 🟢 2. SQL Query တွင် batch_id ကို တိကျစွာ ထည့်သွင်းခြင်း
+        query = """
+        SELECT 
+            s.student_id, 
+            s.student_name,
+            ARRAY_AGG(rt.title) FILTER (WHERE sdl.id IS NULL) AS pending_tasks
+        FROM students s
+        CROSS JOIN routine_templates rt
+        LEFT JOIN student_daily_logs sdl 
+            ON sdl.student_id = s.student_id 
+            AND sdl.template_id = rt.id 
+            AND sdl.log_date = $1
+        WHERE rt.section = $2 AND rt.status = 'active' AND rt.batch_id = $3 AND s.batch_id = $3
+        GROUP BY s.student_id, s.student_name
+        HAVING COUNT(sdl.id) < $4;
+        """
+        pending_students = await conn.fetch(query, today, section_name, BATCH_ID, total_active_count)
+
+    if not pending_students:
+        return
+
+    for idx, stu in enumerate(pending_students):
+        s_id = stu["student_id"]
+        s_name = stu["student_name"] or "သင်တန်းသား"
+        tasks = stu["pending_tasks"] or []
+        
+        # 🟢 လုံခြုံရေးအရ Python ဘက်တွင်လည်း Duplicate ဖြစ်နေသော Task များကို ဖြုတ်ထုတ်ရန် (Set ကိုသုံး၍ Unique ဖြစ်စေခြင်း)
+        unique_tasks = list(dict.fromkeys(tasks))
+        task_list_str = "\n".join([f"  ▫️ {t}" for t in unique_tasks])
 
         msg = (
             f"🔔 *{reminder_title}*\n\n"
