@@ -923,67 +923,89 @@ async def list_tasks_command2(update: Update, context: ContextTypes.DEFAULT_TYPE
         
 async def broadcast_routine_to_students(section_name: str, header_text: str, target_student_id: int = None) -> int:
     async with db_pool.acquire() as conn:
+        target_batch = BATCH_ID
+
         if target_student_id:
+            stu_batch = await conn.fetchval(
+                "SELECT batch_id FROM students WHERE student_id = $1;", 
+                target_student_id
+            )
+            if stu_batch:
+                target_batch = stu_batch
             students = [{"student_id": target_student_id}]
         else:
-            # 🟢 ဤနေရာတွင် BATCH_ID ဖြင့် ကျောင်းသားများကို စစ်ထုတ်ခြင်း
-            students = await conn.fetch("SELECT student_id FROM students WHERE batch_id = $1;", BATCH_ID)
+            students = await conn.fetch(
+                "SELECT student_id FROM students WHERE batch_id = $1;", 
+                target_batch
+            )
 
         tasks = await conn.fetch(
-            "SELECT id, title, description FROM routine_templates WHERE section = $1 and status = 'active' AND batch_id = $2 ORDER BY task_order ASC;",
-            section_name, BATCH_ID
+            """
+            SELECT id, title, description 
+            FROM routine_templates 
+            WHERE section = $1 AND status = 'active' AND batch_id = $2 
+            ORDER BY task_order ASC;
+            """,
+            section_name, target_batch
         )
 
-    if not tasks or not students:
-        return 0
+        if not tasks or not students:
+            print(f"⚠️ Routine ပို့ရန် မတွေ့ပါ (Tasks: {len(tasks)}, Students: {len(students)}, Batch: {target_batch})")
+            return 0
 
-    count = 0
-    async with Bot(token=STUDENT_BOT_TOKEN) as s_bot:
-        for stu in students:
-            chat_id = stu["student_id"]
-            routine_batch_id = str(uuid.uuid4())[:8]  # 👈 Temporary ID for dismissing
-            batch_message_ids = []
+        count = 0
+        async with Bot(token=STUDENT_BOT_TOKEN) as s_bot:
+            for stu in students:
+                chat_id = stu["student_id"]
+                routine_batch_id = str(uuid.uuid4())[:8] 
+                batch_message_ids = []
 
-            try:
-                # 🗑️ Dismiss ခလုတ်တွင် routine_batch_id ကို ထည့်သုံးခြင်း
-                header_keyboard = [
-                    [InlineKeyboardButton("🗑️ ထပ်နေပါက ဤစာရင်းကို ဖျက်မည်", callback_data=f"dismiss_batch:{routine_batch_id}")]
-                ]
-                
-                h_msg = await s_bot.send_message(
-                    chat_id=chat_id,
-                    text=f"{header_text}\n\nအောက်ပါ လေ့ကျင့်မှုများကို ပြုလုပ်ပြီးပါက သက်ဆိုင်ရာခလုတ်ကို နှိပ်ပေးပါခင်ဗျာ -",
-                    reply_markup=InlineKeyboardMarkup(header_keyboard),
-                    parse_mode="Markdown"
-                )
-                batch_message_ids.append(h_msg.message_id)
-
-                for idx, t in enumerate(tasks, start=1):
-                    t_id = t["id"]
-                    task_text = f"📌 *{idx}။ {t['title']}*"
-                    if t["description"]:
-                        task_text += f"\n_{t['description']}_"
-
-                    task_keyboard = [[InlineKeyboardButton("လုပ်ဆောင်ပြီး (Done)", callback_data=f"done:{t_id}")]
+                try:
+                    header_keyboard = [
+                        [InlineKeyboardButton("🗑️ ထပ်နေပါက ဤစာရင်းကို ဖျက်မည်", callback_data=f"dismiss_batch:{routine_batch_id}")]
                     ]
-                    t_msg = await s_bot.send_message(
+                    
+                    h_msg = await s_bot.send_message(
                         chat_id=chat_id,
-                        text=task_text,
-                        reply_markup=InlineKeyboardMarkup(task_keyboard),
+                        text=f"{header_text}\n\nအောက်ပါ လေ့ကျင့်မှုများကို ပြုလုပ်ပြီးပါက သက်ဆိုင်ရာခလုတ်ကို နှိပ်ပေးပါခင်ဗျာ -",
+                        reply_markup=InlineKeyboardMarkup(header_keyboard),
                         parse_mode="Markdown"
                     )
-                    batch_message_ids.append(t_msg.message_id)
+                    batch_message_ids.append(h_msg.message_id)
 
-                async with db_pool.acquire() as conn:
-                    # 🟢 Database တွင် routine_batch_id ဖြင့် သိမ်းဆည်းခြင်း
+                    for idx, t in enumerate(tasks, start=1):
+                        t_id = t["id"]
+                        task_text = f"📌 *{idx}။ {t['title']}*"
+                        if t["description"]:
+                            task_text += f"\n_{t['description']}_"
+
+                        task_keyboard = [[InlineKeyboardButton("လုပ်ဆောင်ပြီး (Done)", callback_data=f"done:{t_id}")]
+                        ]
+                        
+                        t_msg = await s_bot.send_message(
+                            chat_id=chat_id,
+                            text=task_text,
+                            reply_markup=InlineKeyboardMarkup(task_keyboard),
+                            parse_mode="Markdown"
+                        )
+                        batch_message_ids.append(t_msg.message_id)
+
+                    # 🟢 Database Log သိမ်းဆည်းရာတွင် batch_id ပါ ထည့်သွင်းခြင်း
                     await conn.execute(
-                        "INSERT INTO routine_batch_logs (routine_batch_id, student_id, message_ids) VALUES ($1, $2, $3);",
-                        routine_batch_id, chat_id, batch_message_ids
+                        """
+                        INSERT INTO routine_batch_logs (routine_batch_id, student_id, message_ids, batch_id) 
+                        VALUES ($1, $2, $3, $4);
+                        """,
+                        routine_batch_id, chat_id, batch_message_ids, target_batch
                     )
-                count += 1
-            except Exception as e:
-                print(f"Error sending to {chat_id}: {e}")
-            await asyncio.sleep(0.05)
+                    count += 1
+
+                except Exception as e:
+                    # 🔴 Terminal တွင် တိကျသော Error အား ဖော်ပြရန် Print ထည့်ထားပါသည်
+                    print(f"❌ Error sending routine to {chat_id}: {e}")
+                
+                await asyncio.sleep(0.05)
+
     return count
 
 
